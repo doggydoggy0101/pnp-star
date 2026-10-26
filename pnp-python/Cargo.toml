@@ -1,0 +1,22 @@
+[package]
+name = "pnp-python"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "pnp"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module"] }
+numpy = "0.23"
+nalgebra = "0.33"
+# aliased to `pnp_core` so it doesn't collide with this crate's own lib name `pnp`
+pnp_core = { package = "pnp", path = "../pnp" }
+
+# Build mosek once: it is also a build-dependency of pnp, and build-dependencies
+# use these settings, so matching the release profile shares one MOSEK download.
+[profile.release.build-override]
+opt-level = 3
+codegen-units = 16

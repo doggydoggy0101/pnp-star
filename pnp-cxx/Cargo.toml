@@ -1,0 +1,13 @@
+[package]
+name = "pnp-cxx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "pnp_cxx"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+nalgebra.workspace = true
+pnp = { path = "../pnp" }

@@ -1,0 +1,13 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "pnp-star"  # distribution name; the import name is set below
+version = "0.1.0"
+license = "MIT"
+requires-python = ">=3.9,<3.14"
+
+[tool.maturin]
+module-name = "pnp"  # `pip install pnp-star` then `import pnp`
+features = ["pyo3/extension-module"]

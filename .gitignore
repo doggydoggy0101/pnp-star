@@ -1,0 +1,26 @@
+# rust
+target/
+pnp-python/target/
+pnp-python/Cargo.lock
+
+# build
+build/
+
+# macos
+.DS_Store
+
+# vscode
+.vscode
+
+# clangd
+.cache/
+
+# python
+.venv/
+__pycache__/
+.ruff_cache/
+
+# claude
+NOTES.md
+research/
+experiments/

@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = ["pnp", "pnp-cxx"]
+# pnp-python (PyO3) is built via maturin, not plain `cargo build`. Excluded so the
+# workspace build doesn't try to link the Python extension module.
+exclude = ["pnp-python"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+nalgebra = "0.33"
+rand = "0.8"
+rand_distr = "0.4"
+mosek = "~11.2"  # the crate version IS the MOSEK version
+
+# Build mosek once: it is also a build-dependency of pnp, and build-dependencies
+# use these settings, so matching the release profile shares one MOSEK download.
+[profile.release.build-override]
+opt-level = 3
+codegen-units = 16

@@ -1,0 +1,28 @@
+[package]
+name = "pnp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+links = "pnp"  # exports DEP_PNP_MOSEK_RPATH to dependents' build.rs
+
+[dependencies]
+nalgebra.workspace = true
+rand.workspace = true
+rand_distr.workspace = true
+mosek.workspace = true
+
+# ! also a build-dependency, only for ordering: Cargo runs it (and its MOSEK
+# download) before our build.rs, which looks for that download to bake rpaths.
+[build-dependencies]
+mosek.workspace = true
+
+# Demos live in the top-level example/ folder (shared with the C++/Python demos),
+# so they're declared explicitly rather than auto-discovered from examples/.
+[[example]]
+name = "demo_pinhole"
+path = "../example/rust/demo_pinhole.rs"
+
+[[example]]
+name = "demo_spherical"
+path = "../example/rust/demo_spherical.rs"
