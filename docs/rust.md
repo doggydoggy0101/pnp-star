@@ -117,7 +117,7 @@ result.optimality_gap;      // f64
 result.rel_optimality_gap;  // f64
 result.rank;                // usize
 result.pose_recovered;      // bool, false => pose is NaN, see rank
-result.certified;           // bool, rank 1 and e3^T P_i z != 0 for all i
+result.certified;           // bool, SDP converged, rank 1, and e3^T P_i z != 0 for all i
 result.eigval_ratio;        // f64
 result.runtime;             // f64, seconds
 ```

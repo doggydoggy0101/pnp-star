@@ -110,7 +110,7 @@ result.optimality_gap      # float
 result.rel_optimality_gap  # float
 result.rank                # int
 result.pose_recovered      # bool, False => pose is NaN, see rank
-result.certified           # bool, rank 1 and e3^T P_i z != 0 for all i
+result.certified           # bool, SDP converged, rank 1, and e3^T P_i z != 0 for all i
 result.eigval_ratio        # float
 result.runtime             # float, seconds
 ```

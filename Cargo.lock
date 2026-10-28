@@ -177,6 +177,7 @@ dependencies = [
  "nalgebra",
  "rand",
  "rand_distr",
+ "sdp-star",
 ]
 
 [[package]]
@@ -267,6 +268,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96b02de82ddbe1b636e6170c21be622223aea188ef2e139be0a5b219ec215323"
 dependencies = [
  "bytemuck",
+]
+
+[[package]]
+name = "sdp-star"
+version = "0.1.0"
+source = "git+https://github.com/doggydoggy0101/sdp-star#5458a05e55cc7e67c2987e2d504f0bde9fe4a426"
+dependencies = [
+ "nalgebra",
 ]
 
 [[package]]

@@ -11,6 +11,7 @@ nalgebra.workspace = true
 rand.workspace = true
 rand_distr.workspace = true
 mosek.workspace = true
+sdp-star.workspace = true
 
 # ! also a build-dependency, only for ordering: Cargo runs it (and its MOSEK
 # download) before our build.rs, which looks for that download to bake rpaths.

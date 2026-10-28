@@ -112,7 +112,7 @@ result.optimality_gap;      // double
 result.rel_optimality_gap;  // double
 result.rank;                // int
 result.pose_recovered;      // bool, false => pose is NaN, see rank
-result.certified;           // bool, rank 1 and e3^T P_i z != 0 for all i
+result.certified;           // bool, SDP converged, rank 1, and e3^T P_i z != 0 for all i
 result.eigval_ratio;        // double
 result.runtime;             // double, seconds
 ```

@@ -15,6 +15,7 @@ nalgebra = "0.33"
 rand = "0.8"
 rand_distr = "0.4"
 mosek = "~11.2"  # the crate version IS the MOSEK version
+sdp-star = { git = "https://github.com/doggydoggy0101/sdp-star" }
 
 # Build mosek once: it is also a build-dependency of pnp, and build-dependencies
 # use these settings, so matching the release profile shares one MOSEK download.

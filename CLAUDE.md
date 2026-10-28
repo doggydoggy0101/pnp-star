@@ -43,7 +43,7 @@ error; change docs or code only after the user agrees.
 changes instead: `git ls-files > files.txt && rsync -a --files-from=files.txt . <scratch>/`), so
 `target/` starts empty. Follow the README's Set-up and Examples sections verbatim.
 - All six demos (Rust, C++, Python × pinhole, spherical) print a `Global (MLE)` row with rank 1 and
-  an opt gap near 7e-08 (pinhole) / 2e-07 (spherical), identical across the three languages up to
+  an opt gap near 6e-09 (pinhole) / 7e-09 (spherical), identical across the three languages up to
   MOSEK jitter. Pinhole also prints a `BnB (MLE)` row.
 - `cargo test --release`: 26 passed.
 - One MOSEK download: exactly one `target/release/build/mosek-*/out/mosek`.
@@ -112,7 +112,10 @@ Cargo workspace:
   reprojection error. Pinhole only. Its own MOSEK SOCP path (McCormick envelopes + rotated cones),
   independent of `SdpProblem`.
 
-**Backend**: `sdp.rs` (`SdpProblem` abstraction), `mosek.rs`.
+**Backend**: `sdp.rs`. Chordal and Reduced build a `StarSdp` (cliques sharing the 13×13 hub) and
+solve it with SDP* (`sdp-star`, a git dependency); Dense and `AlternativeSolver` build an
+`SdpProblem` and solve it with MOSEK (`mosek.rs`). SDP* reports its dual objective as `sdp_value`
+(the lower bound) and a convergence flag, which `certified` also requires.
 
 **Shared** (`pnp/src/`): `data.rs` (`PnpSyntheticDataset`), `utils.rs` (`DataMatrices`,
 `marginalize`/`lift`, rotation constraint matrices), `linalg.rs` (`row3`, `skew`, `exp_so3`,

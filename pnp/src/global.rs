@@ -6,7 +6,10 @@ use nalgebra::{DMatrix, Dyn, Matrix2, Matrix3, Vector2, Vector3};
 
 use crate::linalg::{project_to_so3, row3, skew, vec2rot};
 use crate::nonlinear::{refine_pinhole, refine_spherical, LmOptions};
-use crate::sdp::{dense_to_coeff, solve_sdp, SdpProblem, RANK_TOL};
+use crate::sdp::{
+    dense_to_lower, solve_sdp, solve_star, Clique, Constraint, SdpProblem, StarSdp, SymTriplets,
+    RANK_TOL,
+};
 use crate::utils::{
     col_orthogonal_constraint_matrices, det_constraint_matrices, normalize_pinhole,
     row_orthogonal_constraint_matrices,
@@ -72,11 +75,8 @@ fn m3_to_dm(m: &Matrix3<f64>) -> DMatrix<f64> {
 /// Quotient-ring reduction of one constraint (or objective) matrix: Ξ^T C Ξ, computed
 /// from the nonzeros of C as Σ C[r,k] ξ_r ξ_k^T over the rows ξ_r of Ξ, given sparse. Ξ
 /// is the identity on the hub and kept coordinates, so most rows are unit vectors: a
-/// few entries per constraint instead of two dense products.
-fn quotient_ring_reduce(
-    xi_rows: &[Vec<(usize, f64)>],
-    c: &DMatrix<f64>,
-) -> crate::sdp::SparseCoeff {
+/// few entries per constraint instead of two dense products. Returns the lower triangle.
+fn quotient_ring_reduce(xi_rows: &[Vec<(usize, f64)>], c: &DMatrix<f64>) -> SymTriplets {
     let mut acc: BTreeMap<(usize, usize), f64> = BTreeMap::new();
     for k in 0..c.ncols() {
         for r in 0..c.nrows() {
@@ -92,7 +92,7 @@ fn quotient_ring_reduce(
         }
     }
     acc.into_iter()
-        .filter(|&(_, v)| v != 0.0)
+        .filter(|&((a, b), v)| a >= b && v != 0.0)
         .map(|((a, b), v)| (a, b, v))
         .collect()
 }
@@ -362,22 +362,35 @@ impl GlobalSolver {
             diag_spoke[(k, k)] = 1.0;
         }
 
-        let mut prob = SdpProblem {
-            block_dims: if is_dense {
-                vec![dim_hub + n * spoke_total]
-            } else {
-                vec![dim_i; n]
-            },
-            ..Default::default()
-        };
+        // hub constraints: trace(X_hub[1:,1:]) = 1 normalizes the direction, then rotation;
+        // hub indices agree in all formulations
+        let mut hub_constraints = vec![Constraint {
+            matrix: (1..dim_hub).map(|k| (k, k, 1.0)).collect(),
+            rhs: 1.0,
+        }];
+        for c_rot in &rot_con {
+            hub_constraints.push(Constraint {
+                matrix: dense_to_lower(c_rot),
+                rhs: 0.0,
+            });
+        }
 
-        // Dense: one objective over every spoke diagonal, trace(X_yy)
+        // Dense: one MOSEK block holding every spoke, one objective over their diagonals,
+        // trace(X_yy), and the hub constraints on its leading block
+        let mut prob = SdpProblem::default();
         if is_dense {
+            prob.block_dims = vec![dim_hub + n * spoke_total];
             let obj = (dim_hub..dim_hub + n * spoke_total)
                 .map(|k| (k, k, 1.0))
                 .collect();
             prob.objective.push((0, obj));
+            for c in &hub_constraints {
+                prob.eq_lhs.push(vec![(0, c.matrix.clone())]);
+                prob.eq_rhs.push(c.rhs);
+            }
         }
+        // Chordal/Reduced: one clique per point, sharing the hub, solved by SDP*
+        let mut cliques = Vec::with_capacity(n);
 
         for i in 0..n {
             // clique-local index -> dense-block index
@@ -447,44 +460,14 @@ impl GlobalSolver {
                     .collect()
             });
             if !is_dense {
-                let c_obj = match &t_i {
-                    Some(t) => quotient_ring_reduce(t, &diag_spoke),
-                    None => dense_to_coeff(&diag_spoke),
-                };
-                prob.objective.push((i, c_obj));
-            }
-
-            if i == 0 {
-                // normalize hub direction: trace(X_0[1:,1:]) = 1
-                let mut ehub = vec![];
-                for k in 1..dim_hub {
-                    ehub.push((k, k, 1.0));
-                }
-                prob.eq_lhs.push(vec![(0, ehub)]);
-                prob.eq_rhs.push(1.0);
-
-                // rot_con is dim_hub × dim_hub; hub indices agree in all formulations
-                for c_rot in &rot_con {
-                    prob.eq_lhs.push(vec![(0, dense_to_coeff(c_rot))]);
-                    prob.eq_rhs.push(0.0);
-                }
-            } else if !is_dense {
-                // hub-sharing: X_i[r,c] = X_{i-1}[r,c] for r ≤ c in [0, dim_hub)
-                // ! keeps the Schur complement banded, O(N)
-                for r in 0..dim_hub {
-                    for c in r..dim_hub {
-                        let (ai, a0) = if r == c {
-                            (vec![(r, c, 1.0)], vec![(r, c, -1.0)])
-                        } else {
-                            (
-                                vec![(r, c, 0.5), (c, r, 0.5)],
-                                vec![(r, c, -0.5), (c, r, -0.5)],
-                            )
-                        };
-                        prob.eq_lhs.push(vec![(i, ai), (i - 1, a0)]);
-                        prob.eq_rhs.push(0.0);
-                    }
-                }
+                cliques.push(Clique {
+                    dim: dim_i,
+                    objective: match &t_i {
+                        Some(t) => quotient_ring_reduce(t, &diag_spoke),
+                        None => dense_to_lower(&diag_spoke),
+                    },
+                    constraints: vec![],
+                });
             }
 
             // constraint pool in full space, then reduce to dim_i
@@ -523,23 +506,38 @@ impl GlobalSolver {
                 pool.pool.clone()
             };
 
-            for c in &final_con {
-                let form = match &t_i {
-                    // Reduced: Ξ_i^T C Ξ_i on clique block i
-                    Some(t) => vec![(i, quotient_ring_reduce(t, c))],
-                    // Dense: re-index into the single block; Chordal: clique block i
-                    None if is_dense => vec![(0, coeff_at(c, &clique_map))],
-                    None => vec![(i, dense_to_coeff(c))],
-                };
-                prob.eq_lhs.push(form);
-                prob.eq_rhs.push(0.0);
+            if is_dense {
+                // re-index into the single block
+                for c in &final_con {
+                    prob.eq_lhs.push(vec![(0, coeff_at(c, &clique_map))]);
+                    prob.eq_rhs.push(0.0);
+                }
+            } else {
+                for c in &final_con {
+                    let matrix = match &t_i {
+                        // Reduced: Ξ_i^T C Ξ_i; Chordal: C
+                        Some(t) => quotient_ring_reduce(t, c),
+                        None => dense_to_lower(c),
+                    };
+                    cliques[i].constraints.push(Constraint { matrix, rhs: 0.0 });
+                }
             }
         }
 
-        let sol = solve_sdp(&prob);
-        let sdp_value = sol.objective_value;
+        // MOSEK panics unless optimal, so a returned Dense solution has converged
+        let (blocks, sdp_value, converged) = if is_dense {
+            let sol = solve_sdp(&prob);
+            (sol.blocks, sol.objective_value, true)
+        } else {
+            let sol = solve_star(&StarSdp {
+                hub: dim_hub,
+                cliques,
+                hub_constraints,
+            });
+            (sol.blocks, sol.objective_value, sol.converged)
+        };
 
-        let x_hub = sol.blocks[0].view((0, 0), (dim_hub, dim_hub)).into_owned();
+        let x_hub = blocks[0].view((0, 0), (dim_hub, dim_hub)).into_owned();
 
         let se = x_hub.symmetric_eigen();
         let evals = &se.eigenvalues;
@@ -570,7 +568,8 @@ impl GlobalSolver {
             (0..n).map(|i| rotation * row3(&p, i) + t_cw_raw).collect();
         // for extraction, pinhole only
         let depth_ok = !is_pinhole || p_cam.iter().all(|q| q[2].abs() >= DEPTH_MIN);
-        let certified = rank == 1 && depth_ok;
+        // ! rank 1 certifies only an optimal SDP solution: the solver must have converged
+        let certified = converged && rank == 1 && depth_ok;
 
         if !certified && refine {
             let opts = LmOptions::default();
