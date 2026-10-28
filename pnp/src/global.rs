@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 use nalgebra::linalg::ColPivQR;
@@ -67,6 +67,34 @@ fn no_pose(sdp_value: f64, rank: usize, eigval_ratio: f64, t0: Instant) -> Globa
 
 fn m3_to_dm(m: &Matrix3<f64>) -> DMatrix<f64> {
     DMatrix::from_fn(3, 3, |i, j| m[(i, j)])
+}
+
+/// Quotient-ring reduction of one constraint (or objective) matrix: Ξ^T C Ξ, computed
+/// from the nonzeros of C as Σ C[r,k] ξ_r ξ_k^T over the rows ξ_r of Ξ, given sparse. Ξ
+/// is the identity on the hub and kept coordinates, so most rows are unit vectors: a
+/// few entries per constraint instead of two dense products.
+fn quotient_ring_reduce(
+    xi_rows: &[Vec<(usize, f64)>],
+    c: &DMatrix<f64>,
+) -> crate::sdp::SparseCoeff {
+    let mut acc: BTreeMap<(usize, usize), f64> = BTreeMap::new();
+    for k in 0..c.ncols() {
+        for r in 0..c.nrows() {
+            let v = c[(r, k)];
+            if v == 0.0 {
+                continue;
+            }
+            for &(a, ta) in &xi_rows[r] {
+                for &(b, tb) in &xi_rows[k] {
+                    *acc.entry((a, b)).or_insert(0.0) += v * ta * tb;
+                }
+            }
+        }
+    }
+    acc.into_iter()
+        .filter(|&(_, v)| v != 0.0)
+        .map(|((a, b), v)| (a, b, v))
+        .collect()
 }
 
 /// Re-index a clique-local symmetric matrix into the single dense block.
@@ -406,17 +434,24 @@ impl GlobalSolver {
             }
 
             // objective (per clique; Dense pushed its single form above)
-            let t_i = if is_reduced {
-                Some(build_quotient_ring_transform(&mat_a, dim_hub))
-            } else {
-                None
-            };
+            // Reduced: the rows of Ξ_i, sparse
+            let t_i: Option<Vec<Vec<(usize, f64)>>> = is_reduced.then(|| {
+                let t = build_quotient_ring_transform(&mat_a, dim_hub);
+                (0..t.nrows())
+                    .map(|r| {
+                        (0..t.ncols())
+                            .filter(|&j| t[(r, j)] != 0.0)
+                            .map(|j| (j, t[(r, j)]))
+                            .collect()
+                    })
+                    .collect()
+            });
             if !is_dense {
                 let c_obj = match &t_i {
-                    Some(t) => t.transpose() * &diag_spoke * t,
-                    None => diag_spoke.clone(),
+                    Some(t) => quotient_ring_reduce(t, &diag_spoke),
+                    None => dense_to_coeff(&diag_spoke),
                 };
-                prob.objective.push((i, dense_to_coeff(&c_obj)));
+                prob.objective.push((i, c_obj));
             }
 
             if i == 0 {
@@ -491,7 +526,7 @@ impl GlobalSolver {
             for c in &final_con {
                 let form = match &t_i {
                     // Reduced: Ξ_i^T C Ξ_i on clique block i
-                    Some(t) => vec![(i, dense_to_coeff(&(t.transpose() * c * t)))],
+                    Some(t) => vec![(i, quotient_ring_reduce(t, c))],
                     // Dense: re-index into the single block; Chordal: clique block i
                     None if is_dense => vec![(0, coeff_at(c, &clique_map))],
                     None => vec![(i, dense_to_coeff(c))],
